@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>LLM API料金表</title>
+<style>
+  :root {
+    color-scheme: dark;            /* チェックボックスやスクロールバーも暗い配色にする */
+    --bg: #212429;                 /* 背景 */
+    --row-even: #373a3e;           /* 表の偶数行（背景に白を10%混ぜた色） */
+    --surface: #161b22;            /* 表の見出し・行ホバー */
+    --surface-hover: #21262d;      /* 操作できる要素のホバー */
+    --text: #f0f6fc;               /* 本文（背景との比 約17:1） */
+    --text-muted: #b1bac4;         /* 補足文（背景との比 約9:1） */
+    --border: #3d444d;             /* 表の区切り線 */
+    --border-strong: #8b949e;      /* ボタンの枠線（背景との比 3:1 以上） */
+    --accent: #79c0ff;             /* リンク・並べ替え中の矢印・フォーカス枠 */
+  }
+  body { font-family: -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif; margin: 24px; color: var(--text); background: var(--bg); }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 16px; }
+  .wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  thead th { background: var(--surface); position: sticky; top: 0; white-space: nowrap; }
+  th.big, td.big { font-size: 125%; }   /* input / output 列は他の列の125%の大きさ */
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { background: var(--surface-hover); }
+  th .arrow { display: inline-block; width: 1em; color: var(--text-muted); }
+  th[aria-sort="ascending"] .arrow, th[aria-sort="descending"] .arrow { color: var(--accent); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.notes { min-width: 320px; max-width: 520px; color: var(--text-muted); }
+  tbody tr:nth-child(even) { background: var(--row-even); }
+  tbody tr:hover { background: var(--surface); }
+  a { color: var(--accent); text-decoration: underline; }
+  a:hover { text-decoration-thickness: 2px; }
+  .cols { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; margin-bottom: 12px; font-size: 13px; }
+  .cols .cols-title { color: var(--text-muted); }
+  .cols label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; }
+  .cols button { font: inherit; font-size: 12px; padding: 2px 10px; color: var(--text); border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); cursor: pointer; }
+  .cols button:hover { background: var(--surface-hover); }
+  td.empty { text-align: center; color: var(--text-muted); padding: 24px; }
+  a:focus-visible, .cols button:focus-visible, .cols input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  th.sortable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+</style>
+</head>
+<body>
+<h1>LLM API料金表（2026年10月4日）</h1>
+<div class="sub">料金の単位は USD / 100万トークン。列見出しをクリックすると並べ替えできます（もう一度クリックで昇順・降順を切り替え）。</div>
+<div class="cols" id="vendors"></div>
+<div class="cols" id="cols"></div>
+<div class="wrap">
+  <table id="tbl">
+    <thead><tr id="head"></tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+</div>
+
+<script>
+const CSV_TEXT = `vendor,model,condition,input_usd_per_1M,cached_input_usd_per_1M,output_usd_per_1M,context_tokens,source_url,notes
+Anthropic,Claude Fable 5.1,standard,10.00,0.25,50.00,1000000,https://platform.claude.com/docs/en/about-claude/pricing,"5分キャッシュ書込 12.50 / 1時間キャッシュ書込 20.00 / Batch 入力5.00 出力25.00 / 米国内推論指定は全項目1.1倍 / 中国語ページ https://platform.claude.com/docs/zh-CN/about-claude/pricing も同額を確認"
+Anthropic,Claude Opus 5.5,standard,4.00,0.20,20.00,1000000,https://platform.claude.com/docs/en/about-claude/pricing,"5分キャッシュ書込 5.00 / 1時間キャッシュ書込 8.00 / Batch 入力2.00 出力10.00 / Fastモード(研究プレビュー) 入力8.00 出力40.00 / 中国語ページも同額を確認"
+Anthropic,Claude Sonnet 5.5,standard,2.00,0.20,10.00,1000000,https://platform.claude.com/docs/en/about-claude/pricing,"5分キャッシュ書込 2.50 / 1時間キャッシュ書込 4.00 / Batch 入力1.00 出力5.00 / 中国語ページも同額を確認"
+OpenAI,gpt-6.1-sol,standard short-context,2.00,0.10,10.00,,https://developers.openai.com/api/docs/pricing,"Batch 入力1.00 キャッシュ0.05 出力5.00 / 長文脈の境界トークン数と文脈長は公式ページに記載なし"
+OpenAI,gpt-6.1-sol,standard long-context,4.00,0.20,15.00,,https://developers.openai.com/api/docs/pricing,"Batch 入力2.00 キャッシュ0.10 出力7.50"
+OpenAI,gpt-6-luna,standard short-context,0.10,0.01,0.50,,https://developers.openai.com/api/docs/pricing,"Batch 入力0.05 キャッシュ0.005 出力0.25"
+OpenAI,gpt-6-luna,standard long-context,0.20,0.02,0.75,,https://developers.openai.com/api/docs/pricing,"Batch 入力0.10 キャッシュ0.01 出力0.375"
+OpenAI,gpt-5.6-terra,last-known (not on current official page),2.00,0.20,12.00,,https://community.openai.com/t/announcing-a-major-price-drop-for-5-6-terra-and-luna-and-fast-mode-for-5-6-sol/1388484,"現在の公式料金ページ・モデル一覧にTerraは掲載なし。2026-07-30のOpenAI公式フォーラム告知(値下げ後)の価格。第三者記事では272K超の長文脈は入力4.00 キャッシュ0.40 出力18.00"
+OpenAI,gpt-5.6-sol (Cyber),standard short-context,4.00,0.40,20.00,,https://developers.openai.com/api/docs/pricing,"公式ページのCyberモデル欄に掲載。通常のgpt-6.1-solとは別枠"
+OpenAI,gpt-5.6-sol (Cyber),standard long-context,8.00,0.80,30.00,,https://developers.openai.com/api/docs/pricing,"公式ページのCyberモデル欄に掲載"
+Moonshot AI (Kimi),kimi-k3,standard,3.00,0.30,15.00,1048576,https://platform.kimi.ai/docs/pricing/chat-k3,"キャッシュ書込 5分TTL 3.00 / 1時間TTL 6.00 / 中国語ページ https://platform.kimi.com/docs/pricing/chat-k3 は人民元建てで入力20元 キャッシュ2元 出力100元(米ドル版と約6.7倍で整合)"
+Moonshot AI (Kimi),kimi-k2.7-code,standard,0.95,0.19,4.00,262144,https://platform.kimi.ai/docs/pricing/chat-k27-code,"中国語ページ https://platform.kimi.com/docs/pricing/chat-k27-code は入力6.5元 キャッシュ1.3元 出力27元(整合)"
+Moonshot AI (Kimi),kimi-k2.7-code-highspeed,standard,1.90,0.38,8.00,262144,https://platform.kimi.ai/docs/pricing/chat-k27-code,"標準版の2倍の価格 / 中国語ページは入力13元 キャッシュ2.6元 出力54元"
+Z.ai (Zhipu),GLM-5.3,standard,1.40,0.26,4.40,1000000,https://docs.z.ai/guides/overview/pricing,キャッシュ保存料は期間限定で無料
+Z.ai (Zhipu),GLM-5.3-FlashX,standard,0.37,0.075,1.25,1000000,https://docs.z.ai/guides/overview/pricing,キャッシュ保存料は期間限定で無料
+Z.ai (Zhipu),GLM-5.3-Flash,standard,0.15,0.03,0.50,1000000,https://docs.z.ai/guides/overview/pricing,キャッシュ保存料は期間限定で無料
+Alibaba Cloud (Qwen),Qwen3.8-Max,standard,2.00,0.25,6.00,1000000,https://www.qwencloud.com/models/qwen3.8-max,"キャッシュ列は暗黙キャッシュの入力単価。明示キャッシュは作成2.50 / 読み出し0.17"
+Alibaba Cloud (Qwen),Qwen3.8-Flash,standard,0.15,0.016,0.47,1000000,https://www.qwencloud.com/models/qwen3.8-flash,"キャッシュ列は暗黙キャッシュの入力単価。明示キャッシュは作成0.20 / 読み出し0.016"
+DeepSeek,deepseek-flash (DeepSeek-V4.1-Flash),off-peak,0.15,0.003,0.60,1000000,https://api-docs.deepseek.com/quick_start/pricing,"旧名deepseek-v4-flashもこの価格で課金。空闲時間は高峰の半額"
+DeepSeek,deepseek-flash (DeepSeek-V4.1-Flash),peak,0.30,0.006,1.20,1000000,https://api-docs.deepseek.com/quick_start/pricing,"高峰: 平日 UTC 01:00-04:00 と 06:00-10:00（中国の祝日を除く）"
+DeepSeek,deepseek-v4-pro (DeepSeek-V4-Pro-0813),off-peak,0.66,0.022,1.98,1000000,https://api-docs.deepseek.com/quick_start/pricing,空闲時間は高峰の半額
+DeepSeek,deepseek-v4-pro (DeepSeek-V4-Pro-0813),peak,1.32,0.044,3.96,1000000,https://api-docs.deepseek.com/quick_start/pricing,"高峰: 平日 UTC 01:00-04:00 と 06:00-10:00（中国の祝日を除く）"`;
+
+// 引用符・カンマ・改行に対応した簡易CSVパーサ
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(field); field = "";
+      if (row.length > 1 || row[0] !== "") rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+const COLUMNS = [
+  { key: "vendor",                label: "ベンダー",                 type: "text",  toggle: "ベンダー" },
+  { key: "model",                 label: "model",                    type: "text", sortable: true },
+  { key: "condition",             label: "条件",                     type: "text",  toggle: "条件" },
+  { key: "input_usd_per_1M",      label: "input (USD/1M)",           type: "num",  sortable: true, big: true },
+  { key: "cached_input_usd_per_1M", label: "キャッシュ入力 (USD/1M)", type: "num",   toggle: "キャッシュ" },
+  { key: "output_usd_per_1M",     label: "output (USD/1M)",          type: "num",  sortable: true, big: true },
+  { key: "context_tokens",        label: "文脈長 (トークン)",        type: "num",   toggle: "文脈長" },
+  { key: "source_url",            label: "出典",                     type: "url",   toggle: "出典" },
+  { key: "notes",                 label: "備考",                     type: "notes", toggle: "備考" },
+];
+
+// 表示/非表示を切り替えられる列（初期状態はすべて表示）
+const hiddenCols = new Set();
+const shownCols = () => COLUMNS.filter(c => !hiddenCols.has(c.key));
+
+function renderToggles() {
+  const box = document.getElementById("cols");
+  box.innerHTML = '<span class="cols-title">表示する列:</span>';
+  COLUMNS.filter(c => c.toggle).forEach(col => {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !hiddenCols.has(col.key);
+    cb.addEventListener("change", () => {
+      if (cb.checked) hiddenCols.delete(col.key);
+      else hiddenCols.add(col.key);
+      render();
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(col.toggle));
+    box.appendChild(label);
+  });
+}
+
+const parsed = parseCSV(CSV_TEXT);
+const header = parsed[0];
+const data = parsed.slice(1).map(r => {
+  const o = {};
+  header.forEach((h, i) => { o[h] = r[i] ?? ""; });
+  return o;
+});
+
+const state = { key: null, dir: 1 };
+
+// 表示するベンダーの選択（初期状態はすべて表示）。ベンダー列の表示/非表示とは独立して働く
+const vendors = [...new Set(data.map(r => r.vendor))];
+const hiddenVendors = new Set();
+
+function renderVendorFilter() {
+  const box = document.getElementById("vendors");
+  box.innerHTML = '<span class="cols-title">表示するベンダー:</span>';
+  vendors.forEach(v => {
+    const label = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = !hiddenVendors.has(v);
+    cb.addEventListener("change", () => {
+      if (cb.checked) hiddenVendors.delete(v);
+      else hiddenVendors.add(v);
+      renderBody();
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(v));
+    box.appendChild(label);
+  });
+  [["すべて選択", true], ["すべて解除", false]].forEach(([text, showAll]) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = text;
+    b.addEventListener("click", () => {
+      hiddenVendors.clear();
+      if (!showAll) vendors.forEach(v => hiddenVendors.add(v));
+      renderVendorFilter();
+      renderBody();
+    });
+    box.appendChild(b);
+  });
+}
+
+function compare(a, b, col) {
+  const va = a[col.key], vb = b[col.key];
+  if (col.type === "num") {
+    const ea = va === "", eb = vb === "";
+    if (ea && eb) return 0;
+    if (ea) return 1;      // 空欄は常に末尾
+    if (eb) return -1;
+    return (parseFloat(va) - parseFloat(vb)) * state.dir;
+  }
+  return va.localeCompare(vb, "en", { numeric: true, sensitivity: "base" }) * state.dir;
+}
+
+function renderHead() {
+  const tr = document.getElementById("head");
+  tr.innerHTML = "";
+  shownCols().forEach(col => {
+    const th = document.createElement("th");
+    if (col.type === "num") th.classList.add("num");
+    if (col.big) th.classList.add("big");
+    if (col.sortable) {
+      th.classList.add("sortable");
+      th.tabIndex = 0;
+      th.setAttribute("aria-sort",
+        state.key === col.key ? (state.dir === 1 ? "ascending" : "descending") : "none");
+      const arrow = state.key === col.key ? (state.dir === 1 ? "▲" : "▼") : "⇅";
+      th.innerHTML = `${col.label} <span class="arrow">${arrow}</span>`;
+      const act = () => {
+        if (state.key === col.key) state.dir = -state.dir;
+        else { state.key = col.key; state.dir = 1; }
+        render();
+      };
+      th.addEventListener("click", act);
+      th.addEventListener("keydown", e => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); }
+      });
+    } else {
+      th.textContent = col.label;
+    }
+    tr.appendChild(th);
+  });
+}
+
+function renderBody() {
+  const body = document.getElementById("body");
+  body.innerHTML = "";
+  const rows = data.filter(r => !hiddenVendors.has(r.vendor));
+  if (rows.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = shownCols().length;
+    td.className = "empty";
+    td.textContent = "表示するベンダーが選択されていません";
+    tr.appendChild(td);
+    body.appendChild(tr);
+    return;
+  }
+  if (state.key) {
+    const col = COLUMNS.find(c => c.key === state.key);
+    rows.sort((a, b) => compare(a, b, col));
+  }
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    shownCols().forEach(col => {
+      const td = document.createElement("td");
+      const v = r[col.key];
+      if (col.big) td.classList.add("big");
+      if (col.type === "num") {
+        td.classList.add("num");
+        if (v === "") td.textContent = "—";
+        else if (col.key === "context_tokens") td.textContent = Number(v).toLocaleString("en-US");
+        else td.textContent = v;
+      } else if (col.type === "url") {
+        const a = document.createElement("a");
+        a.href = v; a.target = "_blank"; a.rel = "noopener noreferrer";
+        a.textContent = new URL(v).hostname;
+        td.appendChild(a);
+      } else {
+        if (col.type === "notes") td.classList.add("notes");
+        td.textContent = v;
+      }
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+}
+
+function render() { renderHead(); renderBody(); }
+renderVendorFilter();
+renderToggles();
+render();
+</script>
+</body>
+</html>
